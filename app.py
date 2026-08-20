@@ -1,6 +1,7 @@
 import streamlit as st
 import sqlite3
 import json
+import calendar
 from datetime import datetime, date
 import google.generativeai as genai
 from PIL import Image
@@ -13,15 +14,13 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Zaawansowane style CSS w klimacie Google Gemini (Dark UI)
+# Zaawansowane style CSS w klimacie Gemini + TimeTree
 st.markdown("""
     <style>
-    /* Reset i ukrycie domyślnych pasków Streamlita */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
     
-    /* Główne tło i typografia */
     .stApp {
         background-color: #131314;
         color: #e3e3e3;
@@ -29,78 +28,107 @@ st.markdown("""
     }
     
     .block-container {
-        padding-top: 1.5rem;
+        padding-top: 1.2rem;
         padding-bottom: 3.5rem;
         max-width: 600px;
     }
     
-    /* Nagłówek w stylu Gemini */
     .gemini-header {
-        font-size: 1.7rem;
+        font-size: 1.65rem;
         font-weight: 700;
         background: linear-gradient(90deg, #4da3ff 0%, #9b72cf 50%, #d96570 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         margin-bottom: 12px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
     }
     
-    /* Karta podsumowania (Gemini Glow Box) */
     .gemini-stat-box {
         background: #1e1f20;
         border: 1px solid #333538;
-        border-radius: 20px;
-        padding: 18px 20px;
-        margin-bottom: 20px;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+        border-radius: 18px;
+        padding: 16px 18px;
+        margin-bottom: 16px;
     }
     
-    /* Karty dokumentów */
     .doc-card {
         background: #1e1f20;
         border: 1px solid #2d2f31;
         border-radius: 16px;
-        padding: 16px;
+        padding: 14px;
         margin-bottom: 12px;
-        transition: transform 0.15s ease, border-color 0.15s ease;
-    }
-    .doc-card:hover {
-        border-color: #4da3ff;
     }
     
-    /* Plakietki (Badges) w ciemnym motywie */
     .badge {
         display: inline-block;
-        padding: 4px 10px;
-        border-radius: 12px;
-        font-size: 0.76rem;
+        padding: 3px 8px;
+        border-radius: 10px;
+        font-size: 0.74rem;
         font-weight: 600;
-        margin-right: 6px;
+        margin-right: 5px;
     }
     .badge-active { background-color: rgba(34, 197, 94, 0.18); color: #4ade80; border: 1px solid rgba(74, 222, 128, 0.3); }
     .badge-warning { background-color: rgba(234, 179, 8, 0.18); color: #fde047; border: 1px solid rgba(253, 224, 71, 0.3); }
     .badge-expired { background-color: rgba(239, 68, 68, 0.18); color: #f87171; border: 1px solid rgba(248, 113, 113, 0.3); }
     .badge-category { background-color: rgba(77, 163, 255, 0.15); color: #70b5ff; border: 1px solid rgba(112, 181, 255, 0.3); }
-    
-    /* Dopasowanie pól tekstowych i przycisków */
-    .stTextInput > div > div > input {
-        background-color: #1e1f20 !important;
-        color: #e3e3e3 !important;
-        border-radius: 12px !important;
-        border: 1px solid #333538 !important;
+
+    /* Style siatki kalendarza TimeTree */
+    .cal-header {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        text-align: center;
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #8ab4f8;
+        margin-bottom: 6px;
     }
-    .stButton > button {
-        border-radius: 12px !important;
+    .cal-grid {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 4px;
+        margin-bottom: 15px;
+    }
+    .cal-cell {
+        background: #1e1f20;
+        border: 1px solid #2d2f31;
+        border-radius: 10px;
+        min-height: 48px;
+        padding: 4px 2px;
+        text-align: center;
+        font-size: 0.8rem;
+    }
+    .cal-cell-empty {
+        background: transparent;
+        border: 1px solid transparent;
+    }
+    .cal-cell-today {
+        border-color: #8ab4f8 !important;
+        background: #282a2c;
+    }
+    .cal-cell-has-event {
+        background: linear-gradient(180deg, #1e1f20 0%, #222d3d 100%);
+        border-color: #4da3ff;
+    }
+    .cal-dot {
+        height: 6px;
+        width: 6px;
+        background: #4da3ff;
+        border-radius: 50%;
+        display: inline-block;
+        margin: 2px 1px;
+    }
+    .event-card {
+        background: #1e1f20;
+        border-left: 4px solid #4da3ff;
+        padding: 10px 14px;
+        border-radius: 0 12px 12px 0;
+        margin-bottom: 8px;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# Pobranie klucza z Secrets
 API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 
-# Inicjalizacja bazy SQLite
+# Baza danych SQLite
 conn = sqlite3.connect('documents.db', check_same_thread=False)
 c = conn.cursor()
 c.execute('''
@@ -115,13 +143,11 @@ c.execute('''
 ''')
 conn.commit()
 
-# Funkcja statusu terminu
 def get_status_info(expiry_str):
     try:
         exp_date = datetime.strptime(expiry_str, "%Y-%m-%d").date()
         today = date.today()
         delta = (exp_date - today).days
-        
         if delta < 0:
             return "Wygasło", f"{abs(delta)} dni temu", "badge-expired"
         elif delta <= 30:
@@ -131,13 +157,12 @@ def get_status_info(expiry_str):
     except Exception:
         return "Brak terminu", "-", "badge-category"
 
-# Gradientowy nagłówek
 st.markdown('<div class="gemini-header">✨ Papierologia</div>', unsafe_allow_html=True)
 
-# Zakładki
-tab_list, tab_add = st.tabs(["📋 Moje Dokumenty", "➕ Dodaj Nowy"])
+# 3 Zakładki: Lista, Kalendarz, Dodawanie
+tab_list, tab_cal, tab_add = st.tabs(["📋 Dokumenty", "📅 Kalendarz", "➕ Dodaj Nowy"])
 
-# --- TAB 1: LISTA DOKUMENTÓW ---
+# --- TAB 1: LISTA ---
 with tab_list:
     c.execute("SELECT id, title, category, expiry_date, notes FROM docs ORDER BY expiry_date ASC")
     rows = c.fetchall()
@@ -156,37 +181,31 @@ with tab_list:
             
     st.markdown(f"""
         <div class="gemini-stat-box">
-            <div style="font-size: 0.85rem; color: #a8b3cf;">Podsumowanie archiwum</div>
-            <div style="font-size: 1.4rem; font-weight: bold; margin-top: 4px; color: #f1f5f9;">Zapisane dokumenty: {total_docs}</div>
-            <div style="font-size: 0.85rem; margin-top: 6px; color: #fde047;">⚠️ Kończące się terminy (30 dni): <b>{expiring_soon}</b></div>
+            <div style="font-size: 0.82rem; color: #a8b3cf;">Archiwum</div>
+            <div style="font-size: 1.3rem; font-weight: bold; margin-top: 2px; color: #f1f5f9;">Wszystkie terminy: {total_docs}</div>
+            <div style="font-size: 0.82rem; margin-top: 4px; color: #fde047;">⚠️ Kończące się (30 dni): <b>{expiring_soon}</b></div>
         </div>
     """, unsafe_allow_html=True)
     
-    search_query = st.text_input("🔍 Szukaj w dokumentach...", placeholder="Wpisz np. Media Expert, AGD, Polisa OC...")
+    search_query = st.text_input("🔍 Szukaj...", placeholder="Wyszukaj dokument...")
     
     if not rows:
-        st.info("Brak dokumentów w bazie. Przejdź do zakładki '➕ Dodaj Nowy', aby zeskanować swój pierwszy paragon!")
+        st.info("Brak dokumentów. Dodaj pierwszy w zakładce '➕ Dodaj Nowy'.")
     else:
         for row in rows:
             doc_id, title, category, expiry, notes = row
-            
             if search_query and search_query.lower() not in title.lower() and search_query.lower() not in notes.lower():
                 continue
                 
             status_label, days_label, badge_class = get_status_info(expiry)
-            
             st.markdown(f"""
                 <div class="doc-card">
-                    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                        <div>
-                            <span class="badge badge-category">{category}</span>
-                            <span class="badge {badge_class}">{status_label} ({days_label})</span>
-                            <h4 style="margin: 8px 0 4px 0; color: #f1f5f9; font-size: 1.05rem;">{title}</h4>
-                            <p style="margin: 0; color: #94a3b8; font-size: 0.85rem;">📅 Termin do: <b style="color: #e2e8f0;">{expiry}</b></p>
-                        </div>
-                    </div>
-                    <div style="margin-top: 10px; font-size: 0.85rem; color: #cbd5e1; background: #18191a; padding: 10px; border-radius: 10px; border: 1px solid #282a2c;">
-                        💡 {notes if notes else 'Brak dodatkowych szczegółów.'}
+                    <span class="badge badge-category">{category}</span>
+                    <span class="badge {badge_class}">{status_label} ({days_label})</span>
+                    <h4 style="margin: 6px 0 2px 0; color: #f1f5f9;">{title}</h4>
+                    <p style="margin: 0; color: #94a3b8; font-size: 0.82rem;">📅 Ważne do: <b style="color: #e2e8f0;">{expiry}</b></p>
+                    <div style="margin-top: 8px; font-size: 0.82rem; color: #cbd5e1; background: #18191a; padding: 8px; border-radius: 8px;">
+                        💡 {notes if notes else 'Brak uwag.'}
                     </div>
                 </div>
             """, unsafe_allow_html=True)
@@ -198,10 +217,104 @@ with tab_list:
                     conn.commit()
                     st.rerun()
 
-# --- TAB 2: SKANOWANIE AI ---
+# --- TAB 2: KALENDARZ (TIMETREE STYLE) ---
+with tab_cal:
+    if "cal_year" not in st.session_state:
+        st.session_state.cal_year = date.today().year
+        st.session_state.cal_month = date.today().month
+
+    c.execute("SELECT id, title, category, expiry_date, notes FROM docs")
+    all_docs = c.fetchall()
+    
+    # Grupowanie terminów po dacie
+    events_by_date = {}
+    for doc in all_docs:
+        exp = doc[3]
+        if exp:
+            events_by_date.setdefault(exp, []).append(doc)
+
+    # Nawigacja miesiącami
+    col_prev, col_month_name, col_next = st.columns([1, 3, 1])
+    with col_prev:
+        if st.button("◀", use_container_width=True):
+            if st.session_state.cal_month == 1:
+                st.session_state.cal_month = 12
+                st.session_state.cal_year -= 1
+            else:
+                st.session_state.cal_month -= 1
+            st.rerun()
+            
+    with col_next:
+        if st.button("▶", use_container_width=True):
+            if st.session_state.cal_month == 12:
+                st.session_state.cal_month = 1
+                st.session_state.cal_year += 1
+            else:
+                st.session_state.cal_month += 1
+            st.rerun()
+
+    month_names_pl = ["", "Styczeń", "Luty", "Marzec", "Kwiecień", "Maj", "Czerwiec", "Lipiec", "Sierpień", "Wrzesień", "Październik", "Listopad", "Grudzień"]
+    cur_year = st.session_state.cal_year
+    cur_month = st.session_state.cal_month
+    
+    with col_month_name:
+        st.markdown(f"<h4 style='text-align: center; margin: 4px 0; color: #f1f5f9;'>{month_names_pl[cur_month]} {cur_year}</h4>", unsafe_allow_html=True)
+
+    # Dni tygodnia
+    st.markdown("""
+        <div class="cal-header">
+            <div>PN</div><div>WT</div><div>ŚR</div><div>CZ</div><div>PT</div><div>SB</div><div>ND</div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # Budowanie siatki
+    cal_matrix = calendar.monthcalendar(cur_year, cur_month)
+    today_str = date.today().strftime("%Y-%m-%d")
+    
+    cal_html = '<div class="cal-grid">'
+    month_events = []
+
+    for week in cal_matrix:
+        for day in week:
+            if day == 0:
+                cal_html += '<div class="cal-cell cal-cell-empty"></div>'
+            else:
+                d_str = f"{cur_year:04d}-{cur_month:02d}-{day:02d}"
+                has_event = d_str in events_by_date
+                is_today = (d_str == today_str)
+                
+                cell_class = "cal-cell"
+                if is_today:
+                    cell_class += " cal-cell-today"
+                if has_event:
+                    cell_class += " cal-cell-has-event"
+                    month_events.extend([(d_str, doc) for doc in events_by_date[d_str]])
+                
+                dots = '<div class="cal-dot"></div>' if has_event else ''
+                cal_html += f'<div class="{cell_class}"><div>{day}</div>{dots}</div>'
+    
+    cal_html += '</div>'
+    st.markdown(cal_html, unsafe_allow_html=True)
+
+    # Lista terminów w wybranym miesiącu
+    st.subheader("Wydarzenia w tym miesiącu")
+    if not month_events:
+        st.caption("Brak wygasających gwarancji lub umów w tym miesiącu.")
+    else:
+        for d_str, doc in sorted(month_events, key=lambda x: x[0]):
+            _, title, cat, _, notes = doc
+            st.markdown(f"""
+                <div class="event-card">
+                    <div style="font-size: 0.78rem; color: #8ab4f8; font-weight: 600;">📅 {d_str} ({cat})</div>
+                    <div style="font-weight: 600; color: #f1f5f9; margin-top: 2px;">{title}</div>
+                    <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 2px;">{notes}</div>
+                </div>
+            """, unsafe_allow_html=True)
+
+# --- TAB 3: DODAWANIE ---
 with tab_add:
     st.subheader("Zeskanuj dokument")
-    st.caption("AI przeanalizuje treść, rozpozna nazwę i wyznaczy datę ważności.")
+    st.caption("AI wyciągnie termin i automatycznie umieści go w Twoim kalendarzu.")
     
     camera_photo = st.camera_input("Zrób zdjęcie aparatem")
     file_upload = st.file_uploader("Lub wybierz plik z galerii", type=["jpg", "png", "jpeg"])
@@ -209,12 +322,12 @@ with tab_add:
     photo = camera_photo or file_upload
     
     if photo:
-        st.image(photo, caption="Podgląd zdjęcia", use_container_width=True)
-        if st.button("✨ Przeanalizuj przez Gemini AI", type="primary", use_container_width=True):
+        st.image(photo, caption="Podgląd dokumentu", use_container_width=True)
+        if st.button("✨ Przeanalizuj i zapisz", type="primary", use_container_width=True):
             if not API_KEY:
-                st.error("Brak klucza API w ustawieniach Streamlit Secrets.")
+                st.error("Brak klucza API w Secrets.")
             else:
-                with st.spinner("Gemini analizuje dokument..."):
+                with st.spinner("AI analizuje dokument..."):
                     try:
                         genai.configure(api_key=API_KEY)
                         model = genai.GenerativeModel('gemini-3.6-flash')
@@ -239,7 +352,7 @@ with tab_add:
                             (data.get("title", "Bez nazwy"), data.get("category", "Inne"), data.get("expiry_date", ""), data.get("notes", ""), datetime.now().strftime("%Y-%m-%d"))
                         )
                         conn.commit()
-                        st.success(f"✅ Dodano pomyślnie: {data.get('title')} (Ważne do: {data.get('expiry_date')})")
+                        st.success(f"✅ Zapisano w kalendarzu: {data.get('title')} (Termin: {data.get('expiry_date')})")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Błąd analizy: {e}")
