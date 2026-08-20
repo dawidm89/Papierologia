@@ -46,12 +46,7 @@ with tab1:
             with st.spinner("AI analizuje dokument..."):
                 try:
                     genai.configure(api_key=api_key)
-                    
-                    # Automatyczny wybór dostępnego modelu Vision
-                    available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-                    chosen_model = next((m for m in available_models if 'flash' in m or 'pro-vision' in m or 'gemini' in m), 'models/gemini-1.5-flash-latest')
-                    
-                    model = genai.GenerativeModel(chosen_model)
+                    model = genai.GenerativeModel('gemini-3.6-flash')
                     image = Image.open(photo)
                     
                     prompt = """
