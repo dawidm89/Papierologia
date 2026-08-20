@@ -5,8 +5,26 @@ from datetime import datetime
 import google.generativeai as genai
 from PIL import Image
 
-# Konfiguracja strony pod wygląd mobilny
-st.set_page_config(page_title="Asystent Biurokracji", page_icon="📄", layout="centered")
+# Konfiguracja strony mobilnej
+st.set_page_config(
+    page_title="Papierologia",
+    page_icon="📄",
+    layout="centered",
+    initial_sidebar_state="collapsed"
+)
+
+# Ukrycie menu i paska bocznego dla wyglądu czystej aplikacji
+st.markdown("""
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    .block-container {padding-top: 1.5rem; padding-bottom: 2rem;}
+    </style>
+""", unsafe_allow_html=True)
+
+# Pobranie klucza API z bezpiecznego schowka Streamlit Secrets
+API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 
 # Inicjalizacja bazy danych SQLite
 conn = sqlite3.connect('documents.db', check_same_thread=False)
@@ -23,36 +41,28 @@ c.execute('''
 ''')
 conn.commit()
 
-st.title("📄 Asystent Biurokracji")
+st.title("📄 Papierologia")
 
-# Konfiguracja API Gemini w pasku bocznym
-with st.sidebar:
-    st.header("Ustawienia")
-    api_key = st.text_input("Wklej klucz Gemini API:", type="password")
-    st.caption("Pobierz darmowy klucz na: aistudio.google.com")
-
-# Zakładki: Dodawanie i Przeglądanie
+# Zakładki
 tab1, tab2 = st.tabs(["➕ Dodaj dokument", "📋 Twoje terminy"])
 
 with tab1:
     st.subheader("Zeskanuj paragon lub umowę")
-    camera_photo = st.camera_input("Zrób zdjęcie")
-    file_upload = st.file_uploader("Lub wybierz plik z galerii", type=["jpg", "png", "jpeg"])
+    camera_photo = st.camera_input("Zrób zdjęcie aparatem")
+    file_upload = st.file_uploader("Lub wybierz zdjęcie z galerii", type=["jpg", "png", "jpeg"])
     
     photo = camera_photo or file_upload
 
-    #--- POPRAWKA TUTAJ ---
-    # Używamy st.container, aby upewnić się, że przycisk jest w odpowiednim miejscu
-    button_container = st.container()
-    
-    with button_container:
-        if photo and api_key:
-            # Przycisk jest teraz widoczny tylko gdy jest zdjęcie i klucz
-            if st.button("🚀 Przeanalizuj przez AI", key="analyze_button"):
+    if photo:
+        st.image(photo, caption="Podgląd dokumentu", use_container_width=True)
+        if st.button("🚀 Przeanalizuj przez AI", type="primary", use_container_width=True):
+            if not API_KEY:
+                st.error("Brak klucza API w ustawieniach aplikacji (Secrets).")
+            else:
                 with st.spinner("AI analizuje dokument..."):
                     try:
-                        genai.configure(api_key=api_key)
-                        model = genai.GenerativeModel('gemini-1.5-flash')
+                        genai.configure(api_key=API_KEY)
+                        model = genai.GenerativeModel('gemini-3.6-flash')
                         image = Image.open(photo)
                         
                         prompt = """
@@ -75,11 +85,9 @@ with tab1:
                             (data.get("title", "Bez nazwy"), data.get("category", "Inne"), data.get("expiry_date", ""), data.get("notes", ""), datetime.now().strftime("%Y-%m-%d"))
                         )
                         conn.commit()
-                        st.success(f"Dodano: {data.get('title')} (Ważne do: {data.get('expiry_date')})")
-                        st.rerun() # Odśwież, aby pokazać nowy dokument w tab2
+                        st.success(f"✅ Dodano: {data.get('title')} (Ważne do: {data.get('expiry_date')})")
                     except Exception as e:
                         st.error(f"Błąd analizy: {e}")
-    #--- KONIEC POPRAWKI ---
 
 with tab2:
     st.subheader("Zapisane gwarancje i polisy")
