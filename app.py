@@ -5,61 +5,94 @@ from datetime import datetime, date
 import google.generativeai as genai
 from PIL import Image
 
-# Konfiguracja strony mobilnej
+# Konfiguracja strony pod wygląd mobilny
 st.set_page_config(
     page_title="Papierologia",
-    page_icon="📁",
+    page_icon="✨",
     layout="centered",
     initial_sidebar_state="collapsed"
 )
 
-# Zaawansowane style CSS dla wyglądu natywnej aplikacji
+# Zaawansowane style CSS w klimacie Google Gemini (Dark UI)
 st.markdown("""
     <style>
-    /* Ukrycie elementów Streamlita */
+    /* Reset i ukrycie domyślnych pasków Streamlita */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
     
-    /* Główne tło i odstępy */
+    /* Główne tło i typografia */
+    .stApp {
+        background-color: #131314;
+        color: #e3e3e3;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    
     .block-container {
-        padding-top: 1.2rem;
-        padding-bottom: 3rem;
+        padding-top: 1.5rem;
+        padding-bottom: 3.5rem;
         max-width: 600px;
+    }
+    
+    /* Nagłówek w stylu Gemini */
+    .gemini-header {
+        font-size: 1.7rem;
+        font-weight: 700;
+        background: linear-gradient(90deg, #4da3ff 0%, #9b72cf 50%, #d96570 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    
+    /* Karta podsumowania (Gemini Glow Box) */
+    .gemini-stat-box {
+        background: #1e1f20;
+        border: 1px solid #333538;
+        border-radius: 20px;
+        padding: 18px 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
     }
     
     /* Karty dokumentów */
     .doc-card {
-        background: #ffffff;
-        border: 1px solid #e2e8f0;
+        background: #1e1f20;
+        border: 1px solid #2d2f31;
         border-radius: 16px;
         padding: 16px;
-        margin-bottom: 14px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+        margin-bottom: 12px;
+        transition: transform 0.15s ease, border-color 0.15s ease;
+    }
+    .doc-card:hover {
+        border-color: #4da3ff;
     }
     
-    /* Plakietki kategorii i statusów */
+    /* Plakietki (Badges) w ciemnym motywie */
     .badge {
         display: inline-block;
         padding: 4px 10px;
-        border-radius: 20px;
-        font-size: 0.78rem;
+        border-radius: 12px;
+        font-size: 0.76rem;
         font-weight: 600;
         margin-right: 6px;
     }
-    .badge-active { background-color: #def7ec; color: #03543f; }
-    .badge-warning { background-color: #fef08a; color: #713f12; }
-    .badge-expired { background-color: #fde8e8; color: #9b1c1c; }
-    .badge-category { background-color: #e1effe; color: #1e429f; }
+    .badge-active { background-color: rgba(34, 197, 94, 0.18); color: #4ade80; border: 1px solid rgba(74, 222, 128, 0.3); }
+    .badge-warning { background-color: rgba(234, 179, 8, 0.18); color: #fde047; border: 1px solid rgba(253, 224, 71, 0.3); }
+    .badge-expired { background-color: rgba(239, 68, 68, 0.18); color: #f87171; border: 1px solid rgba(248, 113, 113, 0.3); }
+    .badge-category { background-color: rgba(77, 163, 255, 0.15); color: #70b5ff; border: 1px solid rgba(112, 181, 255, 0.3); }
     
-    /* Statystyki na górze */
-    .stat-box {
-        background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
-        color: white;
-        padding: 18px;
-        border-radius: 18px;
-        margin-bottom: 20px;
-        box-shadow: 0 6px 16px rgba(30, 58, 138, 0.2);
+    /* Dopasowanie pól tekstowych i przycisków */
+    .stTextInput > div > div > input {
+        background-color: #1e1f20 !important;
+        color: #e3e3e3 !important;
+        border-radius: 12px !important;
+        border: 1px solid #333538 !important;
+    }
+    .stButton > button {
+        border-radius: 12px !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -67,7 +100,7 @@ st.markdown("""
 # Pobranie klucza z Secrets
 API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 
-# Inicjalizacja bazy
+# Inicjalizacja bazy SQLite
 conn = sqlite3.connect('documents.db', check_same_thread=False)
 c = conn.cursor()
 c.execute('''
@@ -82,7 +115,7 @@ c.execute('''
 ''')
 conn.commit()
 
-# Pomocnicza funkcja liczenia dni
+# Funkcja statusu terminu
 def get_status_info(expiry_str):
     try:
         exp_date = datetime.strptime(expiry_str, "%Y-%m-%d").date()
@@ -98,19 +131,17 @@ def get_status_info(expiry_str):
     except Exception:
         return "Brak terminu", "-", "badge-category"
 
-# Nagłówek aplikacji
-st.title("📁 Papierologia")
+# Gradientowy nagłówek
+st.markdown('<div class="gemini-header">✨ Papierologia</div>', unsafe_allow_html=True)
 
 # Zakładki
 tab_list, tab_add = st.tabs(["📋 Moje Dokumenty", "➕ Dodaj Nowy"])
 
-# --- TAB 1: LISTA I PRZEGLĄDANIE ---
+# --- TAB 1: LISTA DOKUMENTÓW ---
 with tab_list:
-    # Pobranie danych
     c.execute("SELECT id, title, category, expiry_date, notes FROM docs ORDER BY expiry_date ASC")
     rows = c.fetchall()
     
-    # Karta z podsumowaniem
     total_docs = len(rows)
     expiring_soon = 0
     today = date.today()
@@ -124,23 +155,21 @@ with tab_list:
             pass
             
     st.markdown(f"""
-        <div class="stat-box">
-            <div style="font-size: 0.9rem; opacity: 0.9;">Twój cyfrowy asystent</div>
-            <div style="font-size: 1.5rem; font-weight: bold; margin-top: 4px;">Wszystkie dokumenty: {total_docs}</div>
-            <div style="font-size: 0.85rem; margin-top: 6px;">⚠️ Wygasające w ciągu 30 dni: <b>{expiring_soon}</b></div>
+        <div class="gemini-stat-box">
+            <div style="font-size: 0.85rem; color: #a8b3cf;">Podsumowanie archiwum</div>
+            <div style="font-size: 1.4rem; font-weight: bold; margin-top: 4px; color: #f1f5f9;">Zapisane dokumenty: {total_docs}</div>
+            <div style="font-size: 0.85rem; margin-top: 6px; color: #fde047;">⚠️ Kończące się terminy (30 dni): <b>{expiring_soon}</b></div>
         </div>
     """, unsafe_allow_html=True)
     
-    # Filtrowanie i wyszukiwarka
-    search_query = st.text_input("🔍 Szukaj dokumentu...", placeholder="np. pralka, auto, ubezpieczenie")
+    search_query = st.text_input("🔍 Szukaj w dokumentach...", placeholder="Wpisz np. Media Expert, AGD, Polisa OC...")
     
     if not rows:
-        st.info("Nie masz jeszcze żadnych zapisanych dokumentów. Przejdź do zakładki '➕ Dodaj Nowy', aby zeskanować pierwszy paragon!")
+        st.info("Brak dokumentów w bazie. Przejdź do zakładki '➕ Dodaj Nowy', aby zeskanować swój pierwszy paragon!")
     else:
         for row in rows:
             doc_id, title, category, expiry, notes = row
             
-            # Filtr wyszukiwania
             if search_query and search_query.lower() not in title.lower() and search_query.lower() not in notes.lower():
                 continue
                 
@@ -152,43 +181,43 @@ with tab_list:
                         <div>
                             <span class="badge badge-category">{category}</span>
                             <span class="badge {badge_class}">{status_label} ({days_label})</span>
-                            <h4 style="margin: 8px 0 4px 0; color: #1e293b;">{title}</h4>
-                            <p style="margin: 0; color: #64748b; font-size: 0.85rem;">📅 Termin: <b>{expiry}</b></p>
+                            <h4 style="margin: 8px 0 4px 0; color: #f1f5f9; font-size: 1.05rem;">{title}</h4>
+                            <p style="margin: 0; color: #94a3b8; font-size: 0.85rem;">📅 Termin do: <b style="color: #e2e8f0;">{expiry}</b></p>
                         </div>
                     </div>
-                    <div style="margin-top: 10px; font-size: 0.88rem; color: #475569; background: #f8fafc; padding: 10px; border-radius: 8px;">
-                        💡 {notes if notes else 'Brak dodatkowych uwag.'}
+                    <div style="margin-top: 10px; font-size: 0.85rem; color: #cbd5e1; background: #18191a; padding: 10px; border-radius: 10px; border: 1px solid #282a2c;">
+                        💡 {notes if notes else 'Brak dodatkowych szczegółów.'}
                     </div>
                 </div>
             """, unsafe_allow_html=True)
             
-            col_del, col_space = st.columns([1, 4])
+            col_del, _ = st.columns([1, 3])
             with col_del:
                 if st.button("🗑️ Usuń", key=f"del_{doc_id}", use_container_width=True):
                     c.execute("DELETE FROM docs WHERE id = ?", (doc_id,))
                     conn.commit()
                     st.rerun()
 
-# --- TAB 2: DODAWANIE DOKUMENTU ---
+# --- TAB 2: SKANOWANIE AI ---
 with tab_add:
-    st.subheader("Zeskanuj paragon lub umowę")
-    st.caption("AI automatycznie odczyta przedmiot, kategorię i wyliczy datę gwarancji.")
+    st.subheader("Zeskanuj dokument")
+    st.caption("AI przeanalizuje treść, rozpozna nazwę i wyznaczy datę ważności.")
     
     camera_photo = st.camera_input("Zrób zdjęcie aparatem")
-    file_upload = st.file_uploader("Lub wybierz plik z pamięci telefonu", type=["jpg", "png", "jpeg"])
+    file_upload = st.file_uploader("Lub wybierz plik z galerii", type=["jpg", "png", "jpeg"])
     
     photo = camera_photo or file_upload
     
     if photo:
-        st.image(photo, caption="Podgląd dokumentu", use_container_width=True)
-        if st.button("🚀 Przeanalizuj i zapisz", type="primary", use_container_width=True):
+        st.image(photo, caption="Podgląd zdjęcia", use_container_width=True)
+        if st.button("✨ Przeanalizuj przez Gemini AI", type="primary", use_container_width=True):
             if not API_KEY:
-                st.error("Brak klucza API w ustawieniach.")
+                st.error("Brak klucza API w ustawieniach Streamlit Secrets.")
             else:
-                with st.spinner("AI analizuje dokument..."):
+                with st.spinner("Gemini analizuje dokument..."):
                     try:
                         genai.configure(api_key=API_KEY)
-                        model = genai.GenerativeModel('gemini-2.5-flash')
+                        model = genai.GenerativeModel('gemini-3.6-flash')
                         image = Image.open(photo)
                         
                         prompt = """
@@ -196,9 +225,9 @@ with tab_add:
                         Wyciągnij dane i zwróć WYŁĄCZNIE czysty obiekt JSON (bez znaczników markdown ```json):
                         {
                             "title": "Krótka nazwa przedmiotu/usługi/firmy",
-                            "category": "Gwarancja / Ubezpieczenie / Umowa / Pojazd / Mieszkanie",
+                            "category": "Gwarancja / Ubezpieczenie / Umowa / Pojazd / AGD/RTV",
                             "expiry_date": "YYYY-MM-DD (data końca gwarancji lub umowy; jeśli to paragon bez terminu, dodaj 2 lata do daty zakupu)",
-                            "notes": "Maksymalnie 2 kluczowe zdania o warunkach, numerze polisy lub numerze paragonu"
+                            "notes": "Maksymalnie 2 kluczowe zdania o warunkach, numerze polisy lub paragonu"
                         }
                         """
                         response = model.generate_content([prompt, image])
