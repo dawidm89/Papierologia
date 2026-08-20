@@ -41,37 +41,45 @@ with tab1:
     
     photo = camera_photo or file_upload
 
-    if photo and api_key:
-        if st.button("🚀 Przeanalizuj przez AI"):
-            with st.spinner("AI analizuje dokument..."):
-                try:
-                    genai.configure(api_key=api_key)
-                    model = genai.GenerativeModel('gemini-3.6-flash')
-                    image = Image.open(photo)
-                    
-                    prompt = """
-                    Przeanalizuj ten dokument (paragon, faktura, umowa, polisa). 
-                    Wyciągnij dane i zwróć WYŁĄCZNIE czysty obiekt JSON (bez znaczników markdown ```json):
-                    {
-                        "title": "Krótka nazwa przedmiotu/usługi/firmy",
-                        "category": "Gwarancja / Ubezpieczenie / Umowa / Inne",
-                        "expiry_date": "YYYY-MM-DD (data końca gwarancji lub umowy; jeśli to zwykły paragon bez podanej daty, dodaj 2 lata do daty zakupu)",
-                        "notes": "Krótkie podsumowanie kluczowych warunków (maks. 2 zdania)"
-                    }
-                    """
-                    response = model.generate_content([prompt, image])
-                    raw_text = response.text.replace("```json", "").replace("```", "").strip()
-                    data = json.loads(raw_text)
-                    
-                    # Zapis do bazy danych
-                    c.execute(
-                        "INSERT INTO docs (title, category, expiry_date, notes, created_at) VALUES (?, ?, ?, ?, ?)",
-                        (data.get("title", "Bez nazwy"), data.get("category", "Inne"), data.get("expiry_date", ""), data.get("notes", ""), datetime.now().strftime("%Y-%m-%d"))
-                    )
-                    conn.commit()
-                    st.success(f"Dodano: {data.get('title')} (Ważne do: {data.get('expiry_date')})")
-                except Exception as e:
-                    st.error(f"Błąd analizy: {e}")
+    #--- POPRAWKA TUTAJ ---
+    # Używamy st.container, aby upewnić się, że przycisk jest w odpowiednim miejscu
+    button_container = st.container()
+    
+    with button_container:
+        if photo and api_key:
+            # Przycisk jest teraz widoczny tylko gdy jest zdjęcie i klucz
+            if st.button("🚀 Przeanalizuj przez AI", key="analyze_button"):
+                with st.spinner("AI analizuje dokument..."):
+                    try:
+                        genai.configure(api_key=api_key)
+                        model = genai.GenerativeModel('gemini-1.5-flash')
+                        image = Image.open(photo)
+                        
+                        prompt = """
+                        Przeanalizuj ten dokument (paragon, faktura, umowa, polisa). 
+                        Wyciągnij dane i zwróć WYŁĄCZNIE czysty obiekt JSON (bez znaczników markdown ```json):
+                        {
+                            "title": "Krótka nazwa przedmiotu/usługi/firmy",
+                            "category": "Gwarancja / Ubezpieczenie / Umowa / Inne",
+                            "expiry_date": "YYYY-MM-DD (data końca gwarancji lub umowy; jeśli to zwykły paragon bez podanej daty, dodaj 2 lata do daty zakupu)",
+                            "notes": "Krótkie podsumowanie kluczowych warunków (maks. 2 zdania)"
+                        }
+                        """
+                        response = model.generate_content([prompt, image])
+                        raw_text = response.text.replace("```json", "").replace("```", "").strip()
+                        data = json.loads(raw_text)
+                        
+                        # Zapis do bazy danych
+                        c.execute(
+                            "INSERT INTO docs (title, category, expiry_date, notes, created_at) VALUES (?, ?, ?, ?, ?)",
+                            (data.get("title", "Bez nazwy"), data.get("category", "Inne"), data.get("expiry_date", ""), data.get("notes", ""), datetime.now().strftime("%Y-%m-%d"))
+                        )
+                        conn.commit()
+                        st.success(f"Dodano: {data.get('title')} (Ważne do: {data.get('expiry_date')})")
+                        st.rerun() # Odśwież, aby pokazać nowy dokument w tab2
+                    except Exception as e:
+                        st.error(f"Błąd analizy: {e}")
+    #--- KONIEC POPRAWKI ---
 
 with tab2:
     st.subheader("Zapisane gwarancje i polisy")
